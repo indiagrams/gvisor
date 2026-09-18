@@ -354,6 +354,30 @@ func TestValidationFail(t *testing.T) {
 			},
 			error: "overlay flag has been replaced with overlay2 flag",
 		},
+		{
+			name: "uds-path+network:none",
+			flags: map[string]string{
+				"uds-path": "/run/netproxy.sock",
+				"network":  "none",
+			},
+			error: "uds-path flag is only supported with sandbox networking",
+		},
+		{
+			name: "uds-path+network:host",
+			flags: map[string]string{
+				"uds-path": "/run/netproxy.sock",
+				"network":  "host",
+			},
+			error: "uds-path flag is only supported with sandbox networking",
+		},
+		{
+			name: "uds-path+xdp",
+			flags: map[string]string{
+				"uds-path":         "/run/netproxy.sock",
+				"EXPERIMENTAL-xdp": "ns",
+			},
+			error: "uds-path flag is incompatible with XDP",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testFlags := flag.NewFlagSet("test", flag.ContinueOnError)

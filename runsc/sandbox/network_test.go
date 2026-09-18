@@ -15,11 +15,14 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -728,5 +731,106 @@ func TestCollectLinksAndRoutes_LoopbackExtraRoutes(t *testing.T) {
 	}
 	if !fdbasedLinksEqual(args.FDBasedLinks, wantFDLinks) {
 		t.Errorf("FDBasedLinks mismatch:\ngot  %+v\nwant %+v", args.FDBasedLinks, wantFDLinks)
+	}
+}
+
+func TestDialExternalUDS(t *testing.T) {
+	// The peer listens on SOCK_SEQPACKET, as an external network proxy must.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netproxy.sock")
+	ln, err := net.Listen("unixpacket", path)
+	if err != nil {
+		t.Fatalf("net.Listen(\"unixpacket\", %q) failed: %v", path, err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			accepted <- nil
+			return
+		}
+		accepted <- conn
+	}()
+
+	f, err := dialExternalUDS(path)
+	if err != nil {
+		t.Fatalf("dialExternalUDS(%q) failed: %v", path, err)
+	}
+	defer f.Close()
+
+	var peer net.Conn
+	select {
+	case peer = <-accepted:
+		if peer == nil {
+			t.Fatal("ln.Accept() failed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the peer to accept the connection")
+	}
+	defer peer.Close()
+
+	// Message boundaries must be preserved in both directions: the sentry and
+	// the external proxy exchange one IP packet per datagram.
+	wantOutbound := []byte("outbound-packet")
+	if _, err := f.Write(wantOutbound); err != nil {
+		t.Fatalf("f.Write(%q) failed: %v", wantOutbound, err)
+	}
+	got := make([]byte, 64)
+	if err := peer.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("peer.SetReadDeadline() failed: %v", err)
+	}
+	n, err := peer.Read(got)
+	if err != nil {
+		t.Fatalf("peer.Read() failed: %v", err)
+	}
+	if string(got[:n]) != string(wantOutbound) {
+		t.Errorf("peer read %q, want %q", got[:n], wantOutbound)
+	}
+
+	wantInbound := []byte("inbound-packet")
+	if _, err := peer.Write(wantInbound); err != nil {
+		t.Fatalf("peer.Write(%q) failed: %v", wantInbound, err)
+	}
+	n, err = f.Read(got)
+	if err != nil {
+		t.Fatalf("f.Read() failed: %v", err)
+	}
+	if string(got[:n]) != string(wantInbound) {
+		t.Errorf("sandbox socket read %q, want %q", got[:n], wantInbound)
+	}
+}
+
+func TestDialExternalUDSRejectsStreamPeer(t *testing.T) {
+	// A SOCK_STREAM peer provides no message boundaries and must be rejected by
+	// the kernel with EPROTOTYPE.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("net.Listen(\"unix\", %q) failed: %v", path, err)
+	}
+	defer ln.Close()
+
+	f, err := dialExternalUDS(path)
+	if err == nil {
+		_ = f.Close()
+		t.Fatalf("dialExternalUDS(%q) succeeded against a SOCK_STREAM listener, want error", path)
+	}
+	if !errors.Is(err, unix.EPROTOTYPE) {
+		t.Errorf("dialExternalUDS(%q) = %v, want EPROTOTYPE", path, err)
+	}
+}
+
+func TestDialExternalUDSMissingPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.sock")
+	f, err := dialExternalUDS(path)
+	if err == nil {
+		_ = f.Close()
+		t.Fatalf("dialExternalUDS(%q) succeeded for a nonexistent socket, want error", path)
+	}
+	if !errors.Is(err, unix.ENOENT) {
+		t.Errorf("dialExternalUDS(%q) = %v, want ENOENT", path, err)
 	}
 }

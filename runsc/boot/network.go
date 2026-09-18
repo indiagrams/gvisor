@@ -90,6 +90,7 @@ type DefaultRoute struct {
 	Name  string
 }
 
+// Neighbor represents an ARP/NDP neighbor entry to be added to the stack.
 type Neighbor struct {
 	IP           net.IP
 	HardwareAddr net.HardwareAddr
@@ -205,6 +206,42 @@ type CreateLinksAndRoutesArgs struct {
 
 	// IsRestore indicates whether this is part of a restore flow.
 	IsRestore bool
+
+	// UDSInterface is the name of the interface in FDBasedLinks that is backed
+	// by a UDS network link. Empty if UDS networking is disabled.
+	UDSInterface string
+}
+
+func hasFDBasedLink(args *CreateLinksAndRoutesArgs, name string) bool {
+	for _, l := range args.FDBasedLinks {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// PrimaryInterface returns the interface name that handles default traffic
+// and is present in FDBasedLinks.
+func PrimaryInterface(args *CreateLinksAndRoutesArgs) string {
+	if args == nil {
+		return ""
+	}
+	if args.Defaultv4Gateway.Name != "" && hasFDBasedLink(args, args.Defaultv4Gateway.Name) {
+		return args.Defaultv4Gateway.Name
+	}
+	if args.Defaultv6Gateway.Name != "" && hasFDBasedLink(args, args.Defaultv6Gateway.Name) {
+		return args.Defaultv6Gateway.Name
+	}
+	for _, l := range args.FDBasedLinks {
+		if l.Name == "eth0" {
+			return l.Name
+		}
+	}
+	if len(args.FDBasedLinks) == 1 {
+		return args.FDBasedLinks[0].Name
+	}
+	return ""
 }
 
 // InitPluginStackArgs are arguments to InitPluginStack.
@@ -361,19 +398,27 @@ func (n *Network) CreateLinksAndRoutes(args *CreateLinksAndRoutesArgs, _ *struct
 				FDs = append(FDs, newFD)
 				fdOffset++
 			}
-
 			mac := tcpip.LinkAddress(link.LinkAddress)
+			isUDS := args.UDSInterface != "" && link.Name == args.UDSInterface
+			rxChecksumOffload := link.RXChecksumOffload
+			// Over a UDS link, a peer configured with symmetrical TXChecksumOffload
+			// sends packets without computed L4 checksums. Enable RXChecksumOffload on
+			// the sentry side as well so those packets are accepted rather than
+			// dropped for invalid checksums.
+			if isUDS && link.TXChecksumOffload {
+				rxChecksumOffload = true
+			}
 
 			linkEP, err := fdbased.New(&fdbased.Options{
 				FDs:                  FDs,
 				MTU:                  uint32(link.MTU),
-				EthernetHeader:       mac != "",
+				EthernetHeader:       mac != "" && !isUDS,
 				Address:              mac,
 				PacketDispatchMode:   dispatchMode,
 				GSOMaxSize:           link.GSOMaxSize,
 				GVisorGSOEnabled:     link.GVisorGSOEnabled,
 				TXChecksumOffload:    link.TXChecksumOffload,
-				RXChecksumOffload:    link.RXChecksumOffload,
+				RXChecksumOffload:    rxChecksumOffload,
 				GRO:                  link.GVisorGRO,
 				ProcessorsPerChannel: link.ProcessorsPerChannel,
 				IsPacketSocket:       link.IsPacket,
@@ -433,9 +478,11 @@ func (n *Network) CreateLinksAndRoutes(args *CreateLinksAndRoutesArgs, _ *struct
 				routes = append(routes, route)
 			}
 
-			for _, neigh := range link.Neighbors {
-				proto, tcpipAddr := ipToAddressAndProto(neigh.IP)
-				n.Stack.AddStaticNeighbor(nicID, proto, tcpipAddr, tcpip.LinkAddress(neigh.HardwareAddr))
+			if !isUDS {
+				for _, neigh := range link.Neighbors {
+					proto, tcpipAddr := ipToAddressAndProto(neigh.IP)
+					n.Stack.AddStaticNeighbor(nicID, proto, tcpipAddr, tcpip.LinkAddress(neigh.HardwareAddr))
+				}
 			}
 		}
 	} else if len(args.XDPLinks) > 0 {

@@ -174,6 +174,7 @@ go_test(
         "compat_test.go",
         "loader_test.go",
         "mount_hints_test.go",
+        "network_test.go",
         "vfs_test.go",
     ],
     library = ":boot",

@@ -25,6 +25,13 @@ go_test(
     deps = [
         "//pkg/abi/linux",
         "//pkg/sentry/kernel/auth",
+        "//pkg/tcpip",
+        "//pkg/tcpip/adapters/gonet",
+        "//pkg/tcpip/header",
+        "//pkg/tcpip/link/fdbased",
+        "//pkg/tcpip/network/ipv4",
+        "//pkg/tcpip/stack",
+        "//pkg/tcpip/transport/tcp",
         "//pkg/test/dockerutil",
         "//pkg/test/testutil",
         "//runsc/specutils",

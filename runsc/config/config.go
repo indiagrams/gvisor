@@ -175,6 +175,26 @@ type Config struct {
 	// PCAP is a file to which network packets should be logged in PCAP format.
 	PCAP string `flag:"pcap-log"`
 
+	// UDSPath, if set, is the filesystem path of an external SOCK_SEQPACKET
+	// Unix domain socket that the sentry attaches its primary network interface
+	// to instead of creating an AF_PACKET socket.
+	//
+	// The external peer is responsible for proxying the sandbox's IP packets
+	// and enforcing any egress policy.
+	//
+	// Security note: runsc provides ZERO egress protection in this mode.
+	// Destination filtering (blocking loopback, pod-local interface addresses,
+	// link-local/cloud-metadata 169.254.169.254, unspecified, broadcast, and
+	// multicast destinations) is not performed by runsc and is the sole
+	// responsibility of the operator of the external proxy.
+	//
+	// The sentry writes bare IP packets (no Ethernet header), one packet per
+	// datagram, so the peer MUST listen on a SOCK_SEQPACKET socket; connecting
+	// to a SOCK_STREAM listener fails with EPROTOTYPE. Link offload settings
+	// (MTU, GSO, GRO, checksum offload) are not negotiated over the socket and
+	// must be agreed out-of-band with the peer.
+	UDSPath string `flag:"uds-path"`
+
 	// Platform is the platform to run on.
 	Platform string `flag:"platform"`
 
@@ -492,6 +512,12 @@ type Config struct {
 	SharedRootDir string `flag:"shared-root"`
 }
 
+// UseUDS reports whether the primary sandbox network interface should be
+// attached to a Unix domain socket instead of a raw AF_PACKET socket.
+func (c *Config) UseUDS() bool {
+	return c.UDSPath != ""
+}
+
 // Validate checks that the Config is in a consistent state, e.g. that no
 // interdependent or mutually-exclusive flag values conflict. Note that
 // Config.Override does not validate, so callers must call Validate once they
@@ -509,6 +535,12 @@ func (c *Config) Validate() error {
 	}
 	if c.PauseExternalNetworking && c.Network != NetworkSandbox {
 		return fmt.Errorf("pause-external-networking flag is only supported with sandbox networking")
+	}
+	if c.UDSPath != "" && c.Network != NetworkSandbox {
+		return fmt.Errorf("uds-path flag is only supported with sandbox networking")
+	}
+	if c.UDSPath != "" && c.XDP.Mode != XDPModeOff {
+		return fmt.Errorf("uds-path flag is incompatible with XDP")
 	}
 	if c.TBFBurst > maxQDiscTBFBurst {
 		return fmt.Errorf("qdisc-tbf-burst must be <= %d, got: %d", maxQDiscTBFBurst, c.TBFBurst)
@@ -1305,6 +1337,7 @@ func (o *Overlay2) RootOverlayMedium() OverlayMedium {
 	return o.medium
 }
 
+// RootOverlaySize returns the overlay size config of the root mount.
 func (o *Overlay2) RootOverlaySize() string {
 	if !o.rootMount {
 		return ""
@@ -1320,6 +1353,7 @@ func (o *Overlay2) SubMountOverlayMedium() OverlayMedium {
 	return o.medium
 }
 
+// SubMountOverlaySize returns the overlay size config of submounts.
 func (o *Overlay2) SubMountOverlaySize() string {
 	if !o.subMounts {
 		return ""

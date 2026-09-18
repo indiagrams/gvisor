@@ -152,7 +152,7 @@ endif
 # Configure helpers for below.
 configure_noreload = \
   $(call header,CONFIGURE $(1) → $(RUNTIME_BIN) $(RUNTIME_ARGS) $(2)); \
-  sudo $(RUNTIME_BIN) install --config_file="$(DOCKER_DAEMON_CONFIG_PATH)" --experimental=true --runtime="$(1)" -- $(RUNTIME_ARGS) --debug-log "$(RUNTIME_LOGS)" --allow-suid $(2) && \
+  sudo $(RUNTIME_BIN) install --config_file="$(DOCKER_DAEMON_CONFIG_PATH)" --experimental=true --runtime="$(1)" -- $(RUNTIME_ARGS) --debug-log "$(RUNTIME_LOGS)" --allow-suid --allow-flag-override $(2) && \
   sudo rm -rf "$(RUNTIME_LOG_DIR)" && mkdir -p "$(RUNTIME_LOG_DIR)" && chmod 0777 "$(RUNTIME_LOG_DIR)"
 
 reload_docker = \
