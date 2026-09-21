@@ -491,6 +491,8 @@ TEST(CloneTest, NonCanonicalTLS) {
                       nullptr, kNonCanonical),
               SyscallFailsWithErrno(EPERM));
 #elif defined(__aarch64__) || defined(__riscv)
+  // Native Linux on arm64/riscv allows arbitrary 64-bit values in TPIDR_EL0/tp.
+  SKIP_IF(!IsRunningOnGvisor());
   EXPECT_THAT(syscall(__NR_clone, SIGCHLD | CLONE_SETTLS, &stack, nullptr,
                       kNonCanonical, nullptr),
               SyscallFailsWithErrno(EPERM));
