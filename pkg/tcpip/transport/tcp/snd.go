@@ -11,6 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// This file was changed by Ferry in 2026. The changes add the RFC 4015 undo
+// of a spurious loss recovery (RFC 3522): the pipe estimate taken when a
+// recovery begins (pipePrev) is restored when that recovery ends spurious,
+// and a recovery is judged spurious only when the TCP Timestamps option is on.
 
 package tcp
 

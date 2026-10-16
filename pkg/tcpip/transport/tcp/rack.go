@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// This file was changed by Ferry in 2026. The changes add the two calls that
+// capture the pipe estimate before a loss response, for snd.go's RFC 4015
+// undo of a spurious loss recovery.
 
 package tcp
 
